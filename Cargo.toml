@@ -8,5 +8,10 @@ edition = "2021"
 [dependencies]
 ff = "0.13"
 rand_core = { version = "0.6", default-features = false }
-halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git"}
-halo2curves = { git = "https://github.com/scroll-tech/halo2curves.git"}
+halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git" }
+halo2_gadgets = { git = "https://github.com/scroll-tech/halo2.git" }
+halo2curves = { version = "0.1.0", features = [ "derive_serde" ] }
+log = "0.4.17"
+
+[dev-dependencies]
+env_logger = "0.8.0"
