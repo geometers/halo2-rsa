@@ -192,3 +192,4 @@ mod fpmul;
 mod lookup_range_check;
 mod mul_cfgs;
 mod poly_eval;
+mod witness_gen;

@@ -15,7 +15,6 @@ pub(crate) struct Config<const K: usize, F: PrimeFieldBits> {
     pub(crate) poly: Column<Advice>,
     pub(crate) eval: Column<Advice>,
     pub(crate) range_check: LookupRangeCheckConfig<F, K>,
-    _marker: PhantomData<F>,
 }
 
 impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
@@ -55,7 +54,6 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
             poly,
             eval,
             range_check,
-            _marker: PhantomData,
         }
     }
 
