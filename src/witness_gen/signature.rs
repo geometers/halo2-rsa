@@ -6,7 +6,7 @@ use rsa::RsaPrivateKey;
 
 const KEY_BITS: usize = 2048;
 
-pub(super) fn sign(data: &[u8]) -> (Vec<u8>, Vec<u8>) {
+pub fn sign(data: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let mut rng = rand_core::OsRng;
 
     let private_key = RsaPrivateKey::new(&mut rng, KEY_BITS).expect("failed to generate a key");

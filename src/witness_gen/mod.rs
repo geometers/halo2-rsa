@@ -1,8 +1,8 @@
 mod check_trace;
 mod poly_mul;
-mod signature;
-mod trace_gen;
-mod utils;
+pub mod signature;
+pub mod trace_gen;
+pub mod utils;
 
 /*
 

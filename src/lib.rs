@@ -188,8 +188,9 @@ FpMul:
 
 */
 
-mod fpmul;
+mod check_carry_to_zero;
 mod lookup_range_check;
 mod mul_cfgs;
 mod poly_eval;
+mod rsa;
 mod witness_gen;

@@ -193,6 +193,20 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
         )
     }
 
+    /// FIXME: delete this
+    pub fn tmp_witness_check(
+        &self,
+        mut layouter: impl Layouter<F>,
+        value: Value<F>,
+        num_words: usize,
+        strict: bool,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        layouter.assign_region(
+            || "Witness element",
+            |mut region| region.assign_advice(|| "Witness element", self.running_sum, 0, || value),
+        )
+    }
+
     /// If `strict` is set to "true", the field element must fit into
     /// `num_words * K` bits. In other words, the the final cumulative sum `z_{num_words}`
     /// must be zero.

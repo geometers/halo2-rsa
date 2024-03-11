@@ -1,12 +1,26 @@
 use crate::lookup_range_check::LookupRangeCheckConfig;
 
-use ff::PrimeFieldBits;
+/*
+struct LoadedPoly {
+    vec of cells,
+    evaluation
+}
+
+17 * 5 * LoadedPoly
+*/
+
+use ff::{Field, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::*,
     poly::Rotation,
 };
-use std::{marker::PhantomData, vec};
+use std::vec;
+
+pub(crate) struct LoadedPoly<const COEFFS: usize, F: Field> {
+    pub(crate) coeffs: [AssignedCell<F, F>; COEFFS],
+    pub(crate) eval: AssignedCell<F, F>,
+}
 
 #[derive(Clone)]
 /// (selector, poly, eval)
@@ -33,18 +47,21 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         meta.create_gate("poly eval", |meta| {
             let selector = meta.query_selector(selector);
             let coeff = meta.query_advice(poly, Rotation::cur());
-            let eval_prev = meta.query_advice(eval, Rotation::prev());
             let eval_cur = meta.query_advice(eval, Rotation::cur());
+            let eval_next = meta.query_advice(eval, Rotation::next());
 
             let x = meta.query_challenge(x);
 
             /*
               selector    poly       eval
-                 0         a2         a2
-                 1         a1         a2 * x + a1
-                 1         a0         a2 * x^2 + a1x + a0
+                1         a0         a2 * x^2 + a1x + a0
+                1         a1         a2 * x + a1
+                0         a2         a2
             */
-            vec![selector * (eval_prev * x + coeff - eval_cur)]
+
+            // eval_cur = coeff + challenge * eval_next
+            let expected_eval = coeff + x * eval_next;
+            vec![selector * (eval_cur - expected_eval)]
         });
 
         let range_check = LookupRangeCheckConfig::<F, K>::configure(meta, range_check, table);
@@ -57,24 +74,24 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         }
     }
 
-    // Loads the values [0..2^K) into `table_idx`.
-    pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
-        layouter.assign_table(
-            || "table_idx",
-            |mut table| {
-                // We generate the row values lazily (we only need them during keygen).
-                for index in 0..(1 << K) {
-                    table.assign_cell(
-                        || "table_idx",
-                        self.range_check.table_idx,
-                        index,
-                        || Value::known(F::from(index as u64)),
-                    )?;
-                }
-                Ok(())
-            },
-        )
-    }
+    // // Loads the values [0..2^K) into `table_idx`.
+    // pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    //     layouter.assign_table(
+    //         || "table_idx",
+    //         |mut table| {
+    //             // We generate the row values lazily (we only need them during keygen).
+    //             for index in 0..(1 << K) {
+    //                 table.assign_cell(
+    //                     || "table_idx",
+    //                     self.range_check.table_idx,
+    //                     index,
+    //                     || Value::known(F::from(index as u64)),
+    //                 )?;
+    //             }
+    //             Ok(())
+    //         },
+    //     )
+    // }
 
     pub(crate) fn witness_carry(
         &self,
@@ -82,23 +99,24 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         carry_val: Value<F>,
         num_bits: usize,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let witnessed = self.range_check.witness_check(
+        let witnessed = self.range_check.tmp_witness_check(
             layouter.namespace(|| "carry_val"),
             carry_val,
             K,
             false,
         )?;
 
-        // Range-constrain remaining chunk (if any).
-        if num_bits % K != 0 {
-            self.range_check.copy_short_check(
-                layouter.namespace(|| "leftover"),
-                witnessed[num_bits / K].clone(),
-                num_bits % K,
-            )?;
-        }
+        // // Range-constrain remaining chunk (if any).
+        // if num_bits % K != 0 {
+        //     self.range_check.copy_short_check(
+        //         layouter.namespace(|| "leftover"),
+        //         witnessed[num_bits / K].clone(),
+        //         num_bits % K,
+        //     )?;
+        // }
 
-        Ok(witnessed[0].clone())
+        // Ok(witnessed[0].clone())
+        Ok(witnessed.clone())
     }
 
     pub(crate) fn witness_poly(
@@ -110,48 +128,98 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
 
         // Witness and range-check each limb of poly_a to be 64 bits
         for (i, coeff) in coeff_vals.iter().enumerate() {
-            let coeff = self.range_check.witness_check(
+            let coeff = self.range_check.tmp_witness_check(
                 layouter.namespace(|| format!("coeff {}", i)),
                 *coeff,
                 4,
                 true,
-            )?[0]
-                .clone();
+            )?;
             coeffs.push(coeff);
         }
 
         Ok(coeffs)
     }
 
+    pub(crate) fn witness_and_evaluate<const COEFFS: usize>(
+        &self,
+        mut layouter: impl Layouter<F>,
+        // little-endian
+        coeff_vals: [Value<F>; COEFFS],
+        x: Value<F>,
+    ) -> Result<LoadedPoly<COEFFS, F>, Error> {
+        let mut coeffs = vec![];
+        layouter.assign_region(
+            || "poly_a",
+            |mut region| {
+                let n = COEFFS;
+
+                let mut eval = coeff_vals[n - 1];
+                let mut eval_cell = region.assign_advice(
+                    || format!("coeff {}", n - 1),
+                    self.eval,
+                    n - 1,
+                    || eval,
+                )?;
+                let last_coeff_cell = region.assign_advice(
+                    || format!("coeff {}", n - 1),
+                    self.poly,
+                    n - 1,
+                    || eval,
+                )?;
+                coeffs.push(last_coeff_cell);
+
+                for i in (0..=(n - 2)).rev() {
+                    self.selector.enable(&mut region, i)?;
+                    let coeff = region.assign_advice(
+                        || format!("eval {}", i),
+                        self.poly,
+                        i,
+                        || coeff_vals[i],
+                    )?;
+
+                    eval = eval * x + coeff.value().copied();
+                    eval_cell =
+                        region.assign_advice(|| format!("eval {}", i), self.eval, i, || eval)?;
+                    coeffs.push(coeff);
+                }
+
+                coeffs.reverse();
+
+                Ok(LoadedPoly {
+                    coeffs: coeffs.clone().try_into().unwrap(),
+                    eval: eval_cell,
+                })
+            },
+        )
+    }
+
     pub(crate) fn evaluate(
         &self,
         mut layouter: impl Layouter<F>,
+        // little-endian
         coeffs: &[AssignedCell<F, F>],
         x: Value<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "poly_a",
             |mut region| {
-                coeffs[0].copy_advice(|| "coeff 0", &mut region, self.poly, 0)?;
-                let mut eval = coeffs[0].value().copied();
-                let mut eval_cell =
-                    coeffs[0].copy_advice(|| "eval 0", &mut region, self.eval, 0)?;
+                let n = coeffs.len();
 
-                for (i, coeff) in coeffs.iter().skip(1).enumerate() {
-                    self.selector.enable(&mut region, i + 1)?;
-                    coeff.copy_advice(
-                        || format!("coeff {}", i + 1),
-                        &mut region,
-                        self.poly,
-                        i + 1,
-                    )?;
-                    eval = eval * x + coeff.value().copied();
-                    eval_cell = region.assign_advice(
-                        || format!("eval {}", i + 1),
-                        self.eval,
-                        i + 1,
-                        || eval,
-                    )?;
+                let mut eval = coeffs[n - 1].value().copied();
+                let mut eval_cell = coeffs[n - 1].copy_advice(
+                    || format!("coeff {}", n - 1),
+                    &mut region,
+                    self.eval,
+                    n - 1,
+                )?;
+
+                for i in (0..=n - 2).rev() {
+                    self.selector.enable(&mut region, i)?;
+                    coeffs[i].copy_advice(|| format!("coeff {}", i), &mut region, self.poly, i)?;
+
+                    eval = eval * x + coeffs[i].value().copied();
+                    eval_cell =
+                        region.assign_advice(|| format!("eval {}", i), self.eval, i, || eval)?;
                 }
 
                 Ok(eval_cell)
@@ -201,8 +269,7 @@ mod tests {
         }
     }
 
-    // Polynomial coeffs are witnessed in big endian notation
-    // to make it more compatible with horners rule
+    // Polynomial coeffs are witnessed in little-endian
     #[derive(Clone, Default)]
     struct MyCircuit<F: PrimeFieldBits> {
         poly_a: [Value<F>; 4],
@@ -225,7 +292,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            config.poly_a.range_check.load(&mut layouter)?;
+            // config.poly_a.range_check.load(&mut layouter)?;
             let x = layouter.get_challenge(config.x);
 
             let poly_a = config.poly_a.witness_poly(
@@ -348,6 +415,7 @@ mod tests {
 
         const K: u32 = 5;
 
+        // 4 + 30 + 200 + 1000
         let circuit = MyCircuit::<Fr> {
             poly_a: [4u64, 3, 2, 1]
                 .iter()

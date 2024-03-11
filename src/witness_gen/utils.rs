@@ -1,5 +1,15 @@
 use ff::{Field, PrimeField};
+use halo2_proofs::circuit::Value;
 use num_bigint::BigUint;
+
+pub fn array_value<const L: usize, F: Field>(array: [F; L]) -> [Value<F>; L] {
+    array
+        .iter()
+        .map(|&coeff| Value::known(coeff))
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
 
 pub fn biguint_to_field<F: PrimeField>(x: &BigUint) -> Vec<F> {
     x.to_u64_digits().iter().map(|&xi| F::from(xi)).collect()
