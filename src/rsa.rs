@@ -8,6 +8,7 @@ use halo2_proofs::poly::Rotation;
 use halo2_proofs::{circuit::Layouter, plonk::Error};
 use num_bigint::BigUint;
 
+use crate::poly_eval::LoadedPoly;
 use crate::witness_gen::signature::sign;
 use crate::witness_gen::trace_gen::FpMulWitness;
 use crate::witness_gen::utils::array_value;
@@ -22,7 +23,7 @@ const TWO_N_M1: usize = 63;
 
 // e = 65537
 #[derive(Clone, Debug, Default)]
-struct PKCSV15Witness<F: PrimeField> {
+pub struct PKCSV15Witness<F: PrimeField> {
     sig: [Value<F>; N],
     n: [Value<F>; N],
     trace: [FpMulWitness<F>; 17],
@@ -33,7 +34,7 @@ struct PKCSV15Witness<F: PrimeField> {
 // ab.eval = a.eval * b.eval
 // qn_r.eval = q.eval * n.eval + r.eval
 #[derive(Clone)]
-struct Config<F: PrimeFieldBits> {
+pub struct Config<F: PrimeFieldBits> {
     poly: poly_eval::Config<16, F>,
     check_carry_to_zero_cfg: check_carry_to_zero::Config<BASE, TWO_N_M1, 16, F>,
     x: Challenge,
@@ -42,7 +43,7 @@ struct Config<F: PrimeFieldBits> {
 }
 
 impl<F: PrimeFieldBits> Config<F> {
-    fn generate_witness(sig: BigUint, n: BigUint) -> PKCSV15Witness<F> {
+    pub fn generate_witness(sig: BigUint, n: BigUint) -> PKCSV15Witness<F> {
         let trace = Trace::<F>::new(n.clone());
         let trace = trace.compute_trace(sig.clone());
 
@@ -53,7 +54,7 @@ impl<F: PrimeFieldBits> Config<F> {
         }
     }
 
-    fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         poly: Column<Advice>,
         eval: Column<Advice>,
@@ -154,10 +155,42 @@ impl<F: PrimeFieldBits> Config<F> {
         )
     }
 
-    fn synthesize(
+    // TODO: add more coments about this
+    fn check_encoded_message(
+        &self,
+        mut layouter: impl Layouter<F>,
+        r: &LoadedPoly<N, F>,
+        digest: &[AssignedCell<F, F>; 4],
+    ) -> Result<(), Error> {
+        layouter.assign_region(
+            || "check encoded message",
+            |mut region| {
+                // check that first 4 limbs are mathcing digest
+                for (coeff, digest) in r.coeffs[..4].iter().zip(digest.iter()) {
+                    region.constrain_equal(coeff.cell(), digest.cell())?;
+                }
+
+                region.constrain_constant(r.coeffs[4].cell(), F::from(217300885422736416u64))?;
+                region.constrain_constant(r.coeffs[5].cell(), F::from(938447882527703397u64))?;
+                region.constrain_constant(r.coeffs[6].cell(), F::from(18446744069417742640u64))?;
+
+                // then it has 24 2^u64 - 1
+                for i in 0..24 {
+                    region.constrain_constant(r.coeffs[7 + i].cell(), F::from(u64::MAX))?;
+                }
+
+                // last one is 2^49 - 1
+                region.constrain_constant(r.coeffs[31].cell(), F::from(562949953421311u64))?;
+                Ok(())
+            },
+        )
+    }
+
+    pub fn synthesize(
         &self,
         mut layouter: impl Layouter<F>,
         witness: &PKCSV15Witness<F>,
+        digest: &[AssignedCell<F, F>; 4],
     ) -> Result<(), Error> {
         let x = layouter.get_challenge(self.x);
 
@@ -246,6 +279,8 @@ impl<F: PrimeFieldBits> Config<F> {
             x,
         )?;
 
+        self.check_encoded_message(layouter.namespace(|| "check encoded message"), &r, &digest)?;
+
         self.check_evals(
             layouter.namespace(|| "check evals"),
             &a_eval,
@@ -282,6 +317,7 @@ mod test_rsa {
     #[derive(Clone, Default)]
     struct MyCircuit<F: PrimeFieldBits> {
         witness: PKCSV15Witness<F>,
+        digest: [Value<F>; 4],
     }
 
     impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
@@ -307,7 +343,18 @@ mod test_rsa {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            config.synthesize(layouter, &self.witness)
+            let mut digest = vec![];
+            layouter.assign_region(
+                || "witness digest",
+                |mut region| {
+                    for (i, &limb) in self.digest.iter().enumerate() {
+                        let limb = region.assign_advice(|| "", config.poly.poly, i, || limb)?;
+                        digest.push(limb);
+                    }
+                    Ok(())
+                },
+            )?;
+            config.synthesize(layouter, &self.witness, &digest.try_into().unwrap())
         }
     }
 
@@ -414,8 +461,13 @@ mod test_rsa {
         let (n, sig) = sign(data);
         let witness =
             Config::generate_witness(BigUint::from_bytes_be(&sig), BigUint::from_bytes_be(&n));
-
-        let circuit = MyCircuit::<Fr> { witness };
+        let digest = [
+            Value::known(Fr::from(8287805712743766052)),
+            Value::known(Fr::from(1951780869528568414)),
+            Value::known(Fr::from(2803555822930092702)),
+            Value::known(Fr::from(3238736544897475342)),
+        ];
+        let circuit = MyCircuit::<Fr> { witness, digest };
 
         {
             test_mock_prover(K, circuit.clone(), Ok(()));

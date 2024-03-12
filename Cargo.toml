@@ -18,3 +18,8 @@ num-integer = "0.1.45"
 
 [dev-dependencies]
 env_logger = "0.8.0"
+criterion = "0.3"
+
+[[bench]]
+name = "rsa"
+harness = false
