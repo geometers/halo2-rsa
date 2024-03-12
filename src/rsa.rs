@@ -35,7 +35,7 @@ struct PKCSV15Witness<F: PrimeField> {
 #[derive(Clone)]
 struct Config<F: PrimeFieldBits> {
     poly: poly_eval::Config<16, F>,
-    check_carry_to_zero_cfg: check_carry_to_zero::Config<BASE, TWO_N_M1>,
+    check_carry_to_zero_cfg: check_carry_to_zero::Config<BASE, TWO_N_M1, 16, F>,
     x: Challenge,
     mul_selector: Selector,
     minus_selector: Selector,
@@ -80,15 +80,17 @@ impl<F: PrimeFieldBits> Config<F> {
             vec![selector * (a - b - s)]
         });
 
-        let x = meta.challenge_usable_after(FirstPhase);
-        let check_carry_to_zero_cfg = check_carry_to_zero::Config::configure(meta, poly, carry);
-
         // dummy for now
         let range_check = meta.advice_column();
         let table = meta.lookup_table_column();
 
+        let x = meta.challenge_usable_after(FirstPhase);
+        let poly = poly_eval::Config::configure(meta, poly, eval, x, range_check, table);
+        let check_carry_to_zero_cfg =
+            check_carry_to_zero::Config::configure(meta, poly.clone(), carry);
+
         Self {
-            poly: poly_eval::Config::configure(meta, poly, eval, x, range_check, table),
+            poly,
             check_carry_to_zero_cfg,
             x,
             mul_selector,
@@ -181,13 +183,11 @@ impl<F: PrimeFieldBits> Config<F> {
             witness.trace[0].r,
             x,
         )?;
-        let f = self.poly.witness_and_evaluate::<TWO_N_M1>(
-            layouter.namespace(|| "f"),
-            witness.trace[0].f,
+        let f = self.check_carry_to_zero_cfg.synthesize(
+            layouter.namespace(|| "check f"),
+            &witness.trace[0].f,
             x,
         )?;
-        self.check_carry_to_zero_cfg
-            .synthesize(layouter.namespace(|| "check f"), &f.coeffs)?;
 
         self.check_evals(
             layouter.namespace(|| "check evals"),
@@ -211,13 +211,11 @@ impl<F: PrimeFieldBits> Config<F> {
                 witness.trace[i].r,
                 x,
             )?;
-            let f = self.poly.witness_and_evaluate::<TWO_N_M1>(
-                layouter.namespace(|| "f"),
-                witness.trace[i].f,
+            let f = self.check_carry_to_zero_cfg.synthesize(
+                layouter.namespace(|| "check f"),
+                &witness.trace[i].f,
                 x,
             )?;
-            self.check_carry_to_zero_cfg
-                .synthesize(layouter.namespace(|| "check f"), &f.coeffs)?;
 
             self.check_evals(
                 layouter.namespace(|| "check evals"),

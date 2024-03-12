@@ -11,7 +11,7 @@ struct LoadedPoly {
 
 use ff::{Field, PrimeFieldBits};
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Layouter, Region, Value},
     plonk::*,
     poly::Rotation,
 };
@@ -140,6 +140,54 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         Ok(coeffs)
     }
 
+    pub(crate) fn witness_and_evaluate_inner<const COEFFS: usize>(
+        &self,
+        mut region: &mut Region<'_, F>,
+        offset: usize,
+        coeff_vals: &[Value<F>; COEFFS],
+        x: Value<F>,
+    ) -> Result<LoadedPoly<COEFFS, F>, Error> {
+        let n = COEFFS;
+        let mut coeffs = vec![];
+
+        let mut eval = coeff_vals[n - 1];
+        let mut eval_cell = region.assign_advice(
+            || format!("coeff {}", n - 1),
+            self.eval,
+            offset + n - 1,
+            || eval,
+        )?;
+        let last_coeff_cell = region.assign_advice(
+            || format!("coeff {}", n - 1),
+            self.poly,
+            offset + n - 1,
+            || eval,
+        )?;
+        coeffs.push(last_coeff_cell);
+
+        for i in (0..=(n - 2)).rev() {
+            self.selector.enable(&mut region, i)?;
+            let coeff = region.assign_advice(
+                || format!("eval {}", i),
+                self.poly,
+                offset + i,
+                || coeff_vals[i],
+            )?;
+
+            eval = eval * x + coeff.value().copied();
+            eval_cell =
+                region.assign_advice(|| format!("eval {}", i), self.eval, offset + i, || eval)?;
+            coeffs.push(coeff);
+        }
+
+        coeffs.reverse();
+
+        Ok(LoadedPoly {
+            coeffs: coeffs.clone().try_into().unwrap(),
+            eval: eval_cell,
+        })
+    }
+
     pub(crate) fn witness_and_evaluate<const COEFFS: usize>(
         &self,
         mut layouter: impl Layouter<F>,
@@ -147,49 +195,9 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         coeff_vals: [Value<F>; COEFFS],
         x: Value<F>,
     ) -> Result<LoadedPoly<COEFFS, F>, Error> {
-        let mut coeffs = vec![];
         layouter.assign_region(
             || "poly_a",
-            |mut region| {
-                let n = COEFFS;
-
-                let mut eval = coeff_vals[n - 1];
-                let mut eval_cell = region.assign_advice(
-                    || format!("coeff {}", n - 1),
-                    self.eval,
-                    n - 1,
-                    || eval,
-                )?;
-                let last_coeff_cell = region.assign_advice(
-                    || format!("coeff {}", n - 1),
-                    self.poly,
-                    n - 1,
-                    || eval,
-                )?;
-                coeffs.push(last_coeff_cell);
-
-                for i in (0..=(n - 2)).rev() {
-                    self.selector.enable(&mut region, i)?;
-                    let coeff = region.assign_advice(
-                        || format!("eval {}", i),
-                        self.poly,
-                        i,
-                        || coeff_vals[i],
-                    )?;
-
-                    eval = eval * x + coeff.value().copied();
-                    eval_cell =
-                        region.assign_advice(|| format!("eval {}", i), self.eval, i, || eval)?;
-                    coeffs.push(coeff);
-                }
-
-                coeffs.reverse();
-
-                Ok(LoadedPoly {
-                    coeffs: coeffs.clone().try_into().unwrap(),
-                    eval: eval_cell,
-                })
-            },
+            |mut region| self.witness_and_evaluate_inner(&mut region, 0, &coeff_vals, x),
         )
     }
 

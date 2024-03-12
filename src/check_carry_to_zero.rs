@@ -1,5 +1,8 @@
-use crate::mul_cfgs::{MulAddConfig, MulConfig};
-use ff::{Field, PrimeField};
+use crate::{
+    mul_cfgs::{MulAddConfig, MulConfig},
+    poly_eval::{self, LoadedPoly},
+};
+use ff::{Field, PrimeField, PrimeFieldBits};
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -8,17 +11,17 @@ use halo2_proofs::{
 };
 
 #[derive(Clone)]
-pub(crate) struct Config<const BASE: u8, const N: usize> {
-    f: Column<Advice>,
+pub(crate) struct Config<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> {
+    poly: poly_eval::Config<K, F>,
     carry: Column<Advice>,
     init_selector: Selector,
     selector: Selector,
 }
 
-impl<const BASE: u8, const N: usize> Config<BASE, N> {
-    pub(crate) fn configure<F: PrimeField>(
+impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<BASE, N, K, F> {
+    pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
-        f: Column<Advice>,
+        poly: poly_eval::Config<K, F>,
         carry: Column<Advice>,
     ) -> Self {
         let base = F::from_u128(1 << BASE);
@@ -43,7 +46,7 @@ impl<const BASE: u8, const N: usize> Config<BASE, N> {
 
         meta.create_gate("check init carry", |meta| {
             let init_selector = meta.query_selector(init_selector);
-            let coeff = meta.query_advice(f, Rotation::cur());
+            let coeff = meta.query_advice(poly.poly, Rotation::cur());
             let carry = meta.query_advice(carry, Rotation::cur());
 
             vec![init_selector * (carry * base - coeff)]
@@ -51,25 +54,26 @@ impl<const BASE: u8, const N: usize> Config<BASE, N> {
 
         meta.create_gate("check carry", |meta| {
             let selector = meta.query_selector(selector);
-            let coeff = meta.query_advice(f, Rotation::cur());
+            let coeff = meta.query_advice(poly.poly, Rotation::cur());
             let carry_prev = meta.query_advice(carry, Rotation::prev());
             let carry_cur = meta.query_advice(carry, Rotation::cur());
             vec![selector * (coeff + carry_prev - carry_cur * base)]
         });
 
         Self {
-            f,
+            poly,
             carry,
             selector,
             init_selector,
         }
     }
 
-    pub(crate) fn synthesize<F: PrimeField>(
+    pub(crate) fn synthesize(
         &self,
         mut layouter: impl Layouter<F>,
-        f: &[AssignedCell<F, F>; N],
-    ) -> Result<(), Error> {
+        f: &[Value<F>; N],
+        x: Value<F>,
+    ) -> Result<LoadedPoly<N, F>, Error> {
         let base_inv = Value::known(F::from_u128(1 << BASE).invert().unwrap());
 
         /*
@@ -84,26 +88,24 @@ impl<const BASE: u8, const N: usize> Config<BASE, N> {
             || "check carry to zero",
             |mut region| {
                 // assign f
-                for (i, coeff) in f.iter().enumerate() {
-                    coeff.copy_advice(|| "", &mut region, self.f, i)?;
-                }
+                let f_loaded = self.poly.witness_and_evaluate_inner(&mut region, 0, f, x)?;
 
                 // enable init selector
                 self.init_selector.enable(&mut region, 0)?;
 
-                let mut carry = (f[0].value().copied()) * base_inv;
+                let mut carry = f[0] * base_inv;
                 let mut carry_cell = region.assign_advice(|| "carry 0", self.carry, 0, || carry)?;
 
                 for i in 1..N {
                     self.selector.enable(&mut region, i)?;
 
-                    carry = (carry + f[i].value().copied()) * base_inv;
+                    carry = (carry + f[i]) * base_inv;
                     carry_cell = region.assign_advice(|| "carry", self.carry, i, || carry)?;
                 }
 
                 region.constrain_constant(carry_cell.cell(), F::ZERO)?;
 
-                Ok(())
+                Ok(f_loaded)
             },
         )
     }
@@ -142,7 +144,7 @@ mod tests {
     }
 
     impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
-        type Config = Config<10, 4>;
+        type Config = (super::Config<10, 4, 10, F>, Challenge);
 
         type FloorPlanner = V1;
 
@@ -152,12 +154,18 @@ mod tests {
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let f = meta.advice_column();
+            let eval = meta.advice_column_in(SecondPhase);
+            let x = meta.challenge_usable_after(FirstPhase);
+            let range_check = meta.advice_column();
+            let table = meta.lookup_table_column();
+
+            let poly = poly_eval::Config::configure(meta, f, eval, x, range_check, table);
             let carry = meta.advice_column();
 
             meta.enable_equality(f);
             meta.enable_equality(carry);
 
-            Self::Config::configure(meta, f, carry)
+            (super::Config::configure(meta, poly, carry), x)
         }
 
         fn synthesize(
@@ -165,6 +173,9 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
+            let x = config.1;
+            let config = config.0;
+
             let mut witness_poly = |poly: Vec<Value<F>>,
                                     column: Column<Advice>|
              -> Result<Vec<AssignedCell<F, F>>, Error> {
@@ -181,10 +192,9 @@ mod tests {
                 )
             };
 
-            let poly_f = witness_poly(self.f.to_vec(), config.f)?.try_into().unwrap();
-
+            let x = layouter.get_challenge(x);
             // check carry to zero on f
-            config.synthesize(layouter.namespace(|| "f"), &poly_f)?;
+            config.synthesize(layouter.namespace(|| "f"), &self.f, x)?;
 
             Ok(())
         }
