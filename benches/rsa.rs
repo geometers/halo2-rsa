@@ -7,11 +7,6 @@ use halo2_proofs::{
     },
     poly::{
         commitment::ParamsProver,
-        ipa::{
-            commitment::{IPACommitmentScheme, ParamsIPA},
-            multiopen::ProverIPA,
-            strategy::SingleStrategy,
-        },
         kzg::{
             commitment::{KZGCommitmentScheme, ParamsKZG},
             multiopen::ProverGWC,
@@ -22,33 +17,25 @@ use halo2_proofs::{
         Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
     },
 };
-use halo2curves::{
-    bn256::{Bn256, Fr},
-    pasta::{pallas, vesta, EqAffine, Fp},
-};
+use halo2curves::bn256::{Bn256, Fr};
 
-use halo2_gadgets::poseidon::{
-    primitives::{self as poseidon, ConstantLength, Spec},
-    Hash, Pow5Chip, Pow5Config,
-};
 use num_bigint::BigUint;
 use rand_core::OsRng;
 use scroll_zkid::rsa::{Config, PKCSV15Witness};
 use scroll_zkid::witness_gen::signature::sign;
 
 use std::convert::TryInto;
-use std::marker::PhantomData;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
 #[derive(Clone, Default)]
-struct RsaCircuit<F: PrimeFieldBits> {
+struct RsaCircuit<F: PrimeFieldBits, const TABLE_BITS: usize> {
     witness: PKCSV15Witness<F>,
     digest: [Value<F>; 4],
 }
 
-impl<F: PrimeFieldBits> Circuit<F> for RsaCircuit<F> {
-    type Config = (Config<F>, Column<Advice>);
+impl<F: PrimeFieldBits, const TABLE_BITS: usize> Circuit<F> for RsaCircuit<F, TABLE_BITS> {
+    type Config = (Config<TABLE_BITS, F>, Column<Advice>);
     type FloorPlanner = V1;
 
     fn without_witnesses(&self) -> Self {
@@ -87,12 +74,12 @@ impl<F: PrimeFieldBits> Circuit<F> for RsaCircuit<F> {
     }
 }
 
-const K: u32 = 13;
+const K: usize = 14;
 
 fn bench_rsa(name: &str, c: &mut Criterion) {
-    let params = ParamsKZG::<Bn256>::new(K);
+    let params = ParamsKZG::<Bn256>::new(K as u32);
 
-    let empty_circuit = RsaCircuit::default();
+    let empty_circuit = RsaCircuit::<Fr, { K - 1 }>::default();
 
     // Initialize the proving key
     let vk = keygen_vk(&params, &empty_circuit).expect("keygen_vk should not fail");
@@ -102,15 +89,17 @@ fn bench_rsa(name: &str, c: &mut Criterion) {
 
     let data = b"hello";
     let (n, sig) = sign(data);
-    let witness =
-        Config::generate_witness(BigUint::from_bytes_be(&sig), BigUint::from_bytes_be(&n));
+    let witness = Config::<{ K - 1 }, Fr>::generate_witness(
+        BigUint::from_bytes_be(&sig),
+        BigUint::from_bytes_be(&n),
+    );
     let digest = [
         Value::known(Fr::from(8287805712743766052)),
         Value::known(Fr::from(1951780869528568414)),
         Value::known(Fr::from(2803555822930092702)),
         Value::known(Fr::from(3238736544897475342)),
     ];
-    let circuit = RsaCircuit::<Fr> { witness, digest };
+    let circuit = RsaCircuit::<Fr, { K - 1 }> { witness, digest };
 
     c.bench_function(&prover_name, |b| {
         // Create a proof

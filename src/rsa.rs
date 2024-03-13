@@ -9,7 +9,6 @@ use halo2_proofs::{circuit::Layouter, plonk::Error};
 use num_bigint::BigUint;
 
 use crate::poly_eval::LoadedPoly;
-use crate::witness_gen::signature::sign;
 use crate::witness_gen::trace_gen::FpMulWitness;
 use crate::witness_gen::utils::array_value;
 use crate::{
@@ -34,15 +33,15 @@ pub struct PKCSV15Witness<F: PrimeField> {
 // ab.eval = a.eval * b.eval
 // qn_r.eval = q.eval * n.eval + r.eval
 #[derive(Clone)]
-pub struct Config<F: PrimeFieldBits> {
-    poly: poly_eval::Config<16, F>,
-    check_carry_to_zero_cfg: check_carry_to_zero::Config<BASE, TWO_N_M1, 16, F>,
+pub struct Config<const TABLE_BITS: usize, F: PrimeFieldBits> {
+    poly: poly_eval::Config<TABLE_BITS, F>,
+    check_carry_to_zero_cfg: check_carry_to_zero::Config<BASE, TWO_N_M1, TABLE_BITS, F>,
     x: Challenge,
     mul_selector: Selector,
     minus_selector: Selector,
 }
 
-impl<F: PrimeFieldBits> Config<F> {
+impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
     pub fn generate_witness(sig: BigUint, n: BigUint) -> PKCSV15Witness<F> {
         let trace = Trace::<F>::new(n.clone());
         let trace = trace.compute_trace(sig.clone());
@@ -81,17 +80,19 @@ impl<F: PrimeFieldBits> Config<F> {
             vec![selector * (a - b - s)]
         });
 
-        // dummy for now
         let range_check = meta.advice_column();
         let table = meta.lookup_table_column();
 
         let x = meta.challenge_usable_after(FirstPhase);
-        let poly = poly_eval::Config::configure(meta, poly, eval, x, range_check, table);
-        let check_carry_to_zero_cfg =
-            check_carry_to_zero::Config::configure(meta, poly.clone(), carry);
+
+        let check_carry_to_zero_cfg = {
+            let poly =
+                poly_eval::Config::configure(meta, poly.clone(), eval, x, range_check, table);
+            check_carry_to_zero::Config::configure(meta, poly, carry)
+        };
 
         Self {
-            poly,
+            poly: poly_eval::Config::configure(meta, poly, eval, x, carry, table),
             check_carry_to_zero_cfg,
             x,
             mul_selector,
@@ -201,19 +202,24 @@ impl<F: PrimeFieldBits> Config<F> {
         let n_eval = n.eval;
 
         // Init
-        let a = self
-            .poly
-            .witness_and_evaluate::<N>(layouter.namespace(|| "a"), witness.sig, x)?;
-        let sig_eval = a.eval;
-
-        let q = self.poly.witness_and_evaluate::<N>(
-            layouter.namespace(|| "q"),
-            witness.trace[0].q,
+        let a = self.poly.witness_and_evaluate_and_range_check::<N>(
+            layouter.namespace(|| "a"),
+            witness.sig,
+            BASE as usize,
             x,
         )?;
-        let mut r = self.poly.witness_and_evaluate::<N>(
+        let sig_eval = a.eval;
+
+        let q = self.poly.witness_and_evaluate_and_range_check::<N>(
+            layouter.namespace(|| "q"),
+            witness.trace[0].q,
+            BASE as usize,
+            x,
+        )?;
+        let mut r = self.poly.witness_and_evaluate_and_range_check::<N>(
             layouter.namespace(|| "r"),
             witness.trace[0].r,
+            BASE as usize,
             x,
         )?;
         let f = self.check_carry_to_zero_cfg.synthesize(
@@ -234,14 +240,16 @@ impl<F: PrimeFieldBits> Config<F> {
 
         for i in 1..16 {
             let a_eval = r.eval.clone();
-            let q = self.poly.witness_and_evaluate::<N>(
+            let q = self.poly.witness_and_evaluate_and_range_check::<N>(
                 layouter.namespace(|| "q"),
                 witness.trace[i].q,
+                BASE as usize,
                 x,
             )?;
-            r = self.poly.witness_and_evaluate::<N>(
+            r = self.poly.witness_and_evaluate_and_range_check::<N>(
                 layouter.namespace(|| "r"),
                 witness.trace[i].r,
+                BASE as usize,
                 x,
             )?;
             let f = self.check_carry_to_zero_cfg.synthesize(
@@ -263,9 +271,10 @@ impl<F: PrimeFieldBits> Config<F> {
 
         // Final mul
         let a_eval = r.eval;
-        let q = self.poly.witness_and_evaluate::<N>(
+        let q = self.poly.witness_and_evaluate_and_range_check::<N>(
             layouter.namespace(|| "q"),
             witness.trace[16].q,
+            BASE as usize,
             x,
         )?;
         let r = self.poly.witness_and_evaluate::<N>(
@@ -313,6 +322,8 @@ mod test_rsa {
     use halo2curves::pairing::Engine;
     use rand_core::OsRng;
 
+    const K: usize = 14;
+
     // Polynomial coeffs are witnessed in little-endian
     #[derive(Clone, Default)]
     struct MyCircuit<F: PrimeFieldBits> {
@@ -321,7 +332,7 @@ mod test_rsa {
     }
 
     impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
-        type Config = Config<F>;
+        type Config = Config<{ K - 1 }, F>;
         type FloorPlanner = V1;
 
         fn without_witnesses(&self) -> Self {
@@ -343,6 +354,8 @@ mod test_rsa {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
+            config.poly.range_check.load(&mut layouter)?;
+
             let mut digest = vec![];
             layouter.assign_region(
                 || "witness digest",
@@ -393,8 +406,8 @@ mod test_rsa {
         let params = ParamsKZG::<Bn256>::new(k);
         let _rng = OsRng;
 
-        let vk = keygen_vk(&params, &circuit).unwrap();
-        let pk = keygen_pk(&params, vk, &circuit).unwrap();
+        let vk = keygen_vk(&params, &MyCircuit::default()).unwrap();
+        let pk = keygen_pk(&params, vk, &MyCircuit::default()).unwrap();
 
         let proof = {
             let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
@@ -453,14 +466,15 @@ mod test_rsa {
 
     #[test]
     fn rsa_test() {
+        use crate::witness_gen::signature::sign;
         use halo2curves::bn256::Fr;
-
-        const K: u32 = 12;
 
         let data = b"hello";
         let (n, sig) = sign(data);
-        let witness =
-            Config::generate_witness(BigUint::from_bytes_be(&sig), BigUint::from_bytes_be(&n));
+        let witness = Config::<{ K - 1 }, _>::generate_witness(
+            BigUint::from_bytes_be(&sig),
+            BigUint::from_bytes_be(&n),
+        );
         let digest = [
             Value::known(Fr::from(8287805712743766052)),
             Value::known(Fr::from(1951780869528568414)),
@@ -470,8 +484,8 @@ mod test_rsa {
         let circuit = MyCircuit::<Fr> { witness, digest };
 
         {
-            test_mock_prover(K, circuit.clone(), Ok(()));
-            test_prover(K, circuit.clone(), true);
+            test_mock_prover(K as u32, circuit.clone(), Ok(()));
+            test_prover(K as u32, circuit.clone(), true);
         }
     }
 }

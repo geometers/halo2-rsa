@@ -1,7 +1,6 @@
 //! Make use of a K-bit lookup table to decompose a field element into K-bit
 //! words.
 
-use halo2_gadgets::utilities::lebs2ip;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, Value},
     plonk::{
@@ -10,11 +9,13 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use std::{convert::TryInto, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 
-/// The running sum $[z_0, ..., z_W]$. If created in strict mode, $z_W = 0$.
+use crate::witness_gen::utils::lebs2ip;
+
+/// The running sum $[z_0, ..., z_W]$.
 #[derive(Debug)]
 pub struct RunningSum<F: PrimeFieldBits>(Vec<AssignedCell<F, F>>);
 impl<F: PrimeFieldBits> std::ops::Deref for RunningSum<F> {
@@ -31,7 +32,7 @@ pub struct LookupRangeCheckConfig<F: PrimeFieldBits, const K: usize> {
     q_lookup: Selector,
     q_running: Selector,
     q_bitshift: Selector,
-    running_sum: Column<Advice>,
+    pub(crate) running_sum: Column<Advice>,
     pub(crate) table_idx: TableColumn,
     _marker: PhantomData<F>,
 }
@@ -101,16 +102,6 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
             )]
         });
 
-        let dummy_q = meta.complex_selector();
-        let dummy_table = meta.lookup_table_column();
-        let dummy_advice = meta.advice_column();
-
-        meta.lookup("dummy lookup", |meta| {
-            let q = meta.query_selector(dummy_q);
-            let a = meta.query_advice(dummy_advice, Rotation::cur());
-            vec![(q * a, dummy_table)]
-        });
-
         // For short lookups, check that the word has been shifted by the correct number of bits.
         // https://p.z.cash/halo2-0.1:decompose-short-lookup
         meta.create_gate("Short lookup bitshift", |meta| {
@@ -161,18 +152,28 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
     pub fn copy_check(
         &self,
         mut layouter: impl Layouter<F>,
-        element: AssignedCell<F, F>,
-        num_words: usize,
-        strict: bool,
+        element: &AssignedCell<F, F>,
+        num_bits: usize,
     ) -> Result<RunningSum<F>, Error> {
-        layouter.assign_region(
-            || format!("{:?} words range check", num_words),
+        let running_sum = layouter.assign_region(
+            || format!("{:?} words range check", num_bits),
             |mut region| {
                 // Copy `element` and initialize running sum `z_0 = element` to decompose it.
                 let z_0 = element.copy_advice(|| "z_0", &mut region, self.running_sum, 0)?;
-                self.range_check(&mut region, z_0, num_words, strict)
+                self.range_check(&mut region, z_0, num_bits)
             },
-        )
+        )?;
+
+        // Range-constrain remaining chunk (if any).
+        if num_bits % K != 0 {
+            self.copy_short_check(
+                layouter.namespace(|| "leftover"),
+                running_sum[num_bits / K].clone(),
+                num_bits % K,
+            )?;
+        }
+
+        Ok(running_sum)
     }
 
     /// Range check on a value that is witnessed in this helper.
@@ -180,50 +181,42 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
         &self,
         mut layouter: impl Layouter<F>,
         value: Value<F>,
-        num_words: usize,
-        strict: bool,
+        num_bits: usize,
     ) -> Result<RunningSum<F>, Error> {
-        layouter.assign_region(
+        let running_sum = layouter.assign_region(
             || "Witness element",
             |mut region| {
                 let z_0 =
                     region.assign_advice(|| "Witness element", self.running_sum, 0, || value)?;
-                self.range_check(&mut region, z_0, num_words, strict)
+                self.range_check(&mut region, z_0, num_bits)
             },
-        )
+        )?;
+
+        // Range-constrain remaining chunk (if any).
+        if num_bits % K != 0 {
+            self.copy_short_check(
+                layouter.namespace(|| "leftover"),
+                running_sum[num_bits / K].clone(),
+                num_bits % K,
+            )?;
+        }
+
+        Ok(running_sum)
     }
 
-    /// FIXME: delete this
-    pub fn tmp_witness_check(
-        &self,
-        mut layouter: impl Layouter<F>,
-        value: Value<F>,
-        num_words: usize,
-        strict: bool,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        layouter.assign_region(
-            || "Witness element",
-            |mut region| region.assign_advice(|| "Witness element", self.running_sum, 0, || value),
-        )
-    }
-
-    /// If `strict` is set to "true", the field element must fit into
-    /// `num_words * K` bits. In other words, the the final cumulative sum `z_{num_words}`
-    /// must be zero.
-    ///
-    /// If `strict` is set to "false", the final `z_{num_words}` is not constrained.
+    /// If `num_bits` is not a multiple of `K`, then the final word must be
+    /// `K % num_bits` bits (using a short range check).
     ///
     /// `element` must have been assigned to `self.running_sum` at offset 0.
     fn range_check(
         &self,
         region: &mut Region<'_, F>,
         element: AssignedCell<F, F>,
-        num_words: usize,
-        strict: bool,
+        num_bits: usize,
     ) -> Result<RunningSum<F>, Error> {
-        // `num_words` must fit into a single field element.
-        assert!(num_words * K <= F::CAPACITY as usize);
-        let num_bits = num_words * K;
+        // `num_bits` must fit into a single field element.
+        assert!(num_bits <= F::CAPACITY as usize);
+        let num_words = num_bits.div_ceil(K);
 
         // Chunk the first num_bits bits into K-bit words.
         let words = {
@@ -237,8 +230,8 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
             });
 
             bits.map(|bits| {
-                bits.chunks_exact(K)
-                    .map(|word| F::from(lebs2ip::<K>(&(word.try_into().unwrap()))))
+                bits.chunks(K)
+                    .map(|word| F::from(lebs2ip::<K>(word)))
                     .collect::<Vec<_>>()
             })
             .transpose_vec(num_words)
@@ -278,10 +271,8 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
             zs.push(z.clone());
         }
 
-        if strict {
-            // Constrain the final `z` to be zero.
-            region.constrain_constant(zs.last().unwrap().cell(), F::ZERO)?;
-        }
+        // Constrain the final `z` to be zero.
+        region.constrain_constant(zs.last().unwrap().cell(), F::ZERO)?;
 
         Ok(RunningSum(zs))
     }
@@ -379,10 +370,9 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
 
 #[cfg(test)]
 mod tests {
-    use super::LookupRangeCheckConfig;
+    use super::*;
 
     use ff::{Field, PrimeFieldBits};
-    use halo2_gadgets::utilities::lebs2ip;
     use halo2_proofs::{
         circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::{FailureLocation, MockProver, VerifyFailure},
@@ -390,16 +380,15 @@ mod tests {
     };
     use halo2curves::pasta::pallas;
 
-    use std::{convert::TryInto, marker::PhantomData};
-
     const K: usize = 10;
 
     #[test]
     fn lookup_range_check() {
         #[derive(Clone, Copy)]
         struct MyCircuit<F: PrimeFieldBits> {
-            num_words: usize,
-            _marker: PhantomData<F>,
+            element: F,
+            expected_final_z: F,
+            num_bits: usize,
         }
 
         impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
@@ -427,25 +416,19 @@ mod tests {
                 // Load table_idx
                 config.load(&mut layouter)?;
 
-                // Lookup constraining element to be no longer than num_words * K bits.
-                let elements_and_expected_final_zs = [
-                    (F::from((1 << (self.num_words * K)) - 1), F::ZERO, true), // a word that is within self.num_words * K bits long
-                    (F::from(1 << (self.num_words * K)), F::ONE, false), // a word that is just over self.num_words * K bits long
-                ];
-
                 fn expected_zs<F: PrimeFieldBits, const K: usize>(
                     element: F,
-                    num_words: usize,
+                    num_bits: usize,
                 ) -> Vec<F> {
                     let chunks = {
                         element
                             .to_le_bits()
                             .iter()
                             .by_vals()
-                            .take(num_words * K)
+                            .take(num_bits)
                             .collect::<Vec<_>>()
-                            .chunks_exact(K)
-                            .map(|chunk| F::from(lebs2ip::<K>(chunk.try_into().unwrap())))
+                            .chunks(K)
+                            .map(|chunk| F::from(lebs2ip::<K>(chunk)))
                             .collect::<Vec<_>>()
                     };
                     let expected_zs = {
@@ -460,30 +443,53 @@ mod tests {
                     expected_zs
                 }
 
-                for (element, expected_final_z, strict) in elements_and_expected_final_zs.iter() {
-                    let expected_zs = expected_zs::<F, { K }>(*element, self.num_words);
+                let expected_zs = expected_zs::<F, { K }>(self.element, self.num_bits);
 
-                    let zs = config.witness_check(
-                        layouter.namespace(|| format!("Lookup {:?}", self.num_words)),
-                        Value::known(*element),
-                        self.num_words,
-                        *strict,
-                    )?;
+                let zs = config.witness_check(
+                    layouter.namespace(|| format!("Lookup {:?}", self.num_bits)),
+                    Value::known(self.element),
+                    self.num_bits,
+                )?;
 
-                    assert_eq!(*expected_zs.last().unwrap(), *expected_final_z);
+                assert_eq!(*expected_zs.last().unwrap(), self.expected_final_z);
 
-                    for (expected_z, z) in expected_zs.into_iter().zip(zs.iter()) {
-                        z.value().assert_if_known(|z| &&expected_z == z);
-                    }
+                for (expected_z, z) in expected_zs.into_iter().zip(zs.iter()) {
+                    z.value().assert_if_known(|z| &&expected_z == z);
                 }
                 Ok(())
             }
         }
 
         {
+            let num_bits = 60;
             let circuit: MyCircuit<pallas::Base> = MyCircuit {
-                num_words: 6,
-                _marker: PhantomData,
+                element: pallas::Base::from((1 << num_bits) - 1),
+                expected_final_z: pallas::Base::ZERO,
+                num_bits,
+            };
+
+            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            assert_eq!(prover.verify(), Ok(()));
+        }
+
+        {
+            let num_bits = 60;
+            let circuit: MyCircuit<pallas::Base> = MyCircuit {
+                element: pallas::Base::from(1 << num_bits),
+                expected_final_z: pallas::Base::ONE,
+                num_bits,
+            };
+
+            let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();
+            assert!(prover.verify().is_err());
+        }
+
+        {
+            let num_bits = 61;
+            let circuit: MyCircuit<pallas::Base> = MyCircuit {
+                element: pallas::Base::from((1 << num_bits) - 1),
+                expected_final_z: pallas::Base::ZERO,
+                num_bits,
             };
 
             let prover = MockProver::<pallas::Base>::run(11, &circuit, vec![]).unwrap();

@@ -2,6 +2,22 @@ use ff::{Field, PrimeField};
 use halo2_proofs::circuit::Value;
 use num_bigint::BigUint;
 
+pub fn lebs2ip<const L: usize>(bits: &[bool]) -> u64 {
+    assert!(L <= 64);
+    let bitlen = bits.len();
+    let bits = if bitlen < L {
+        bits.iter()
+            .copied()
+            .chain(std::iter::repeat(false).take(L - bitlen))
+            .collect()
+    } else {
+        bits.to_vec()
+    };
+    bits.iter()
+        .enumerate()
+        .fold(0u64, |acc, (i, b)| acc + if *b { 1 << i } else { 0 })
+}
+
 pub fn array_value<const L: usize, F: Field>(array: [F; L]) -> [Value<F>; L] {
     array
         .iter()

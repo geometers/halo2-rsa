@@ -14,8 +14,10 @@ use halo2_proofs::{
 pub(crate) struct Config<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> {
     poly: poly_eval::Config<K, F>,
     carry: Column<Advice>,
+    shifted_carry: Column<Advice>,
     init_selector: Selector,
     selector: Selector,
+    carry_shift_selector: Selector,
 }
 
 impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<BASE, N, K, F> {
@@ -27,11 +29,12 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
         let base = F::from_u128(1 << BASE);
         let init_selector = meta.selector();
         let selector = meta.selector();
+        let carry_shift_selector = meta.selector();
 
         let constants = meta.fixed_column();
         meta.enable_constant(constants);
 
-        /* */
+        let shifted_carry = poly.range_check.running_sum;
 
         /*
             given array of coeffs in little-endian
@@ -60,11 +63,26 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
             vec![selector * (coeff + carry_prev - carry_cur * base)]
         });
 
+        meta.create_gate("shift carry", |meta| {
+            let selector = meta.query_selector(carry_shift_selector);
+            let shifted_carry = meta.query_advice(shifted_carry, Rotation::cur());
+            let carry_val = meta.query_advice(carry, Rotation::cur());
+            let shift = {
+                let two_pow_63 = Expression::Constant(F::from(1 << 63));
+                let two_pow_6 = Expression::Constant(F::from(1 << 6));
+                two_pow_63 * two_pow_6
+            };
+
+            vec![selector * (carry_val + shift - shifted_carry)]
+        });
+
         Self {
             poly,
             carry,
+            shifted_carry,
             selector,
             init_selector,
+            carry_shift_selector,
         }
     }
 
@@ -84,9 +102,17 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
                0                1            a3      c3 | (a3 + c2) = c3 * B
                0                1            a4      c4 | (a4 + c3) = c4 * B | c4 == 0
         */
-        layouter.assign_region(
+        let (f_loaded, shifted_carries) = layouter.assign_region(
             || "check carry to zero",
             |mut region| {
+                let mut shifted_carries = vec![];
+                let shift = |carry: Value<F>| {
+                    let two_pow_63 = F::from(1 << 63);
+                    let two_pow_6 = F::from(1 << 6);
+                    let two_pow_69 = two_pow_6 * two_pow_63;
+                    carry + Value::known(two_pow_69)
+                };
+
                 // assign f
                 let f_loaded = self.poly.witness_and_evaluate_inner(&mut region, 0, f, x)?;
 
@@ -95,26 +121,54 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
 
                 let mut carry = f[0] * base_inv;
                 let mut carry_cell = region.assign_advice(|| "carry 0", self.carry, 0, || carry)?;
+                // carry = [-2^69, 2^69]
+                // check that carry + 2^69 is in range [0, 2^70]
+                self.carry_shift_selector.enable(&mut region, 0)?;
+                let shifted_carry = region.assign_advice(
+                    || "shifted carry",
+                    self.shifted_carry,
+                    0,
+                    || shift(carry),
+                )?;
+                shifted_carries.push(shifted_carry);
 
                 for i in 1..N {
                     self.selector.enable(&mut region, i)?;
+                    self.carry_shift_selector.enable(&mut region, i)?;
 
                     carry = (carry + f[i]) * base_inv;
                     carry_cell = region.assign_advice(|| "carry", self.carry, i, || carry)?;
+
+                    let shifted_carry = region.assign_advice(
+                        || "shifted carry",
+                        self.shifted_carry,
+                        i,
+                        || shift(carry),
+                    )?;
+                    shifted_carries.push(shifted_carry);
                 }
 
                 region.constrain_constant(carry_cell.cell(), F::ZERO)?;
 
-                Ok(f_loaded)
+                Ok((f_loaded, shifted_carries))
             },
-        )
+        )?;
+
+        for shifted_carry in shifted_carries.iter() {
+            self.poly.range_check.copy_check(
+                layouter.namespace(|| "range check shifted_carry"),
+                &shifted_carry,
+                70,
+            )?;
+        }
+
+        Ok(f_loaded)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use halo2_proofs::{
-        arithmetic::CurveAffine,
         circuit::floor_planner::V1,
         plonk::{
             create_proof, keygen_pk, keygen_vk, verify_proof, Challenge, Circuit, FirstPhase,
