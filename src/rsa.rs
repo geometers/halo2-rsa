@@ -100,6 +100,11 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
         }
     }
 
+    // Loads the values [0..2^K) into the range check table.
+    pub fn load_range_check(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.poly.load_range_check(layouter)
+    }
+
     // now we check evaluations: a * b - q*n - r = f
     fn check_evals(
         &self,
@@ -354,7 +359,7 @@ mod test_rsa {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            config.poly.range_check.load(&mut layouter)?;
+            config.load_range_check(&mut layouter)?;
 
             let mut digest = vec![];
             layouter.assign_region(

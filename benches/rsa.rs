@@ -60,6 +60,8 @@ impl<F: PrimeFieldBits, const TABLE_BITS: usize> Circuit<F> for RsaCircuit<F, TA
         let column = config.1;
         let config = config.0;
         let mut digest = vec![];
+
+        config.load_range_check(&mut layouter)?;
         layouter.assign_region(
             || "witness digest",
             |mut region| {
