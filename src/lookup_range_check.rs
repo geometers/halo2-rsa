@@ -123,11 +123,8 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
         config
     }
 
-    #[cfg(test)]
-    // Loads the values [0..2^K) into `table_idx`. This is only used in testing
-    // for now, since the Sinsemilla chip provides a pre-loaded table in the
-    // Orchard context.
-    pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    // Loads the values [0..2^K) into `table_idx`.
+    pub(crate) fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_table(
             || "table_idx",
             |mut table| {

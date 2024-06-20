@@ -65,23 +65,9 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         }
     }
 
-    // Loads the values [0..2^K) into `table_idx`.
-    pub fn load(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
-        layouter.assign_table(
-            || "table_idx",
-            |mut table| {
-                // We generate the row values lazily (we only need them during keygen).
-                for index in 0..(1 << K) {
-                    table.assign_cell(
-                        || "table_idx",
-                        self.range_check.table_idx,
-                        index,
-                        || Value::known(F::from(index as u64)),
-                    )?;
-                }
-                Ok(())
-            },
-        )
+    // Loads the values [0..2^K) into the range check table.
+    pub(crate) fn load_range_check(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.range_check.load(layouter)
     }
 
     pub(crate) fn witness_carry(
