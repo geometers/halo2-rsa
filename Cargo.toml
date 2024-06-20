@@ -1,5 +1,5 @@
 [package]
-name = "scroll-zkid"
+name = "halo2-rsa"
 version = "0.1.0"
 edition = "2021"
 

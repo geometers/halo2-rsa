@@ -19,10 +19,10 @@ use halo2_proofs::{
 };
 use halo2curves::bn256::{Bn256, Fr};
 
+use halo2_rsa::rsa::{Config, PKCSV15Witness};
+use halo2_rsa::witness_gen::signature::sign;
 use num_bigint::BigUint;
 use rand_core::OsRng;
-use scroll_zkid::rsa::{Config, PKCSV15Witness};
-use scroll_zkid::witness_gen::signature::sign;
 
 use std::convert::TryInto;
 

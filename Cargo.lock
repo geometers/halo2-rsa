@@ -407,6 +407,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
 
 [[package]]
+name = "halo2-rsa"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "env_logger",
+ "ff",
+ "halo2_gadgets",
+ "halo2_proofs",
+ "halo2curves",
+ "log",
+ "num-bigint",
+ "num-integer",
+ "rand_core",
+ "rsa",
+]
+
+[[package]]
 name = "halo2_gadgets"
 version = "0.2.0"
 source = "git+https://github.com/scroll-tech/halo2.git#1070391642dd64b2d68b47ec246cba9e35bd3c15"
@@ -869,23 +886,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "scroll-zkid"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "env_logger",
- "ff",
- "halo2_gadgets",
- "halo2_proofs",
- "halo2curves",
- "log",
- "num-bigint",
- "num-integer",
- "rand_core",
- "rsa",
 ]
 
 [[package]]
