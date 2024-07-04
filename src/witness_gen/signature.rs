@@ -1,8 +1,10 @@
-use rsa::pkcs1v15::SigningKey;
-use rsa::sha2::Sha256;
-use rsa::signature::{RandomizedSigner, SignatureEncoding};
-use rsa::traits::PublicKeyParts;
-use rsa::RsaPrivateKey;
+use rsa::{
+    pkcs1v15::SigningKey,
+    sha2::Sha256,
+    signature::{RandomizedSigner, SignatureEncoding},
+    traits::PublicKeyParts,
+    RsaPrivateKey,
+};
 
 const KEY_BITS: usize = 2048;
 

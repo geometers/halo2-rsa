@@ -1,10 +1,12 @@
-use crate::witness_gen::utils::biguint_to_field;
 use ff::PrimeField;
 use halo2_proofs::circuit::Value;
 use num_bigint::BigUint;
 use num_integer::Integer;
 
-use super::{poly_mul::poly_mul, utils::array_value};
+use crate::witness_gen::{
+    poly_mul::poly_mul,
+    utils::{array_value, biguint_to_field},
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct FpMulWitness<F: PrimeField> {

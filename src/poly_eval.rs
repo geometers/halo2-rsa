@@ -1,5 +1,3 @@
-use crate::lookup_range_check::LookupRangeCheckConfig;
-
 use ff::{Field, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, Value},
@@ -7,6 +5,8 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use std::vec;
+
+use crate::lookup_range_check::LookupRangeCheckConfig;
 
 pub(crate) struct LoadedPoly<const COEFFS: usize, F: Field> {
     pub(crate) coeffs: [AssignedCell<F, F>; COEFFS],
@@ -233,18 +233,19 @@ mod tests {
     use super::*;
 
     use ff::{FromUniformBytes, WithSmallOrderMulGroup};
-    use halo2_proofs::circuit::floor_planner::V1;
-    use halo2_proofs::poly::commitment::{CommitmentScheme, Verifier};
-    use halo2_proofs::transcript::EncodedChallenge;
     use halo2_proofs::{
+        circuit::floor_planner::V1,
         dev::{metadata, FailureLocation, MockProver, VerifyFailure},
-        poly::{commitment::ParamsProver, VerificationStrategy},
+        poly::{
+            commitment::{CommitmentScheme, ParamsProver, Verifier},
+            VerificationStrategy,
+        },
         transcript::{
-            Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+            Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge, TranscriptReadBuffer,
+            TranscriptWriterBuffer,
         },
     };
-    use halo2curves::bn256::Bn256;
-    use halo2curves::pairing::Engine;
+    use halo2curves::{bn256::Bn256, pairing::Engine};
     use rand_core::OsRng;
 
     #[derive(Clone)]

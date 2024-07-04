@@ -1,6 +1,7 @@
 //! Make use of a K-bit lookup table to decompose a field element into K-bit
 //! words.
 
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, Value},
     plonk::{
@@ -8,10 +9,7 @@ use halo2_proofs::{
     },
     poly::Rotation,
 };
-
 use std::marker::PhantomData;
-
-use ff::PrimeFieldBits;
 
 use crate::witness_gen::utils::lebs2ip;
 

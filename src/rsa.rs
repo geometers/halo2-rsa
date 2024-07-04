@@ -1,19 +1,18 @@
-use ff::{Field, PrimeField, PrimeFieldBits};
-use halo2_proofs::circuit::{AssignedCell, Value};
-use halo2_proofs::plonk::{
-    create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Challenge, Circuit, Column,
-    ConstraintSystem, FirstPhase, SecondPhase, Selector, ThirdPhase, VerifyingKey,
+use ff::{PrimeField, PrimeFieldBits};
+use halo2_proofs::{
+    circuit::{AssignedCell, Layouter, Value},
+    plonk::{Advice, Challenge, Column, ConstraintSystem, Error, FirstPhase, Selector},
+    poly::Rotation,
 };
-use halo2_proofs::poly::Rotation;
-use halo2_proofs::{circuit::Layouter, plonk::Error};
 use num_bigint::BigUint;
 
-use crate::poly_eval::LoadedPoly;
-use crate::witness_gen::trace_gen::FpMulWitness;
-use crate::witness_gen::utils::array_value;
 use crate::{
     check_carry_to_zero, poly_eval,
-    witness_gen::{trace_gen::Trace, utils::biguint_to_field},
+    poly_eval::LoadedPoly,
+    witness_gen::{
+        trace_gen::{FpMulWitness, Trace},
+        utils::{array_value, biguint_to_field},
+    },
 };
 
 const BASE: u8 = 64;
@@ -312,19 +311,24 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
 #[cfg(test)]
 mod test_rsa {
     use super::*;
-    use ff::{FromUniformBytes, WithSmallOrderMulGroup};
-    use halo2_proofs::circuit::floor_planner::V1;
-    use halo2_proofs::poly::commitment::{CommitmentScheme, Verifier};
-    use halo2_proofs::transcript::EncodedChallenge;
+    use ff::{FromUniformBytes, PrimeFieldBits, WithSmallOrderMulGroup};
     use halo2_proofs::{
+        circuit::{floor_planner::V1, Value},
         dev::{metadata, FailureLocation, MockProver, VerifyFailure},
-        poly::{commitment::ParamsProver, VerificationStrategy},
+        plonk::{
+            create_proof, keygen_pk, keygen_vk, verify_proof, Circuit, ConstraintSystem,
+            SecondPhase, VerifyingKey,
+        },
+        poly::{
+            commitment::{CommitmentScheme, ParamsProver, Verifier},
+            VerificationStrategy,
+        },
         transcript::{
-            Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+            Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge, TranscriptReadBuffer,
+            TranscriptWriterBuffer,
         },
     };
-    use halo2curves::bn256::Bn256;
-    use halo2curves::pairing::Engine;
+    use halo2curves::{bn256::Bn256, pairing::Engine};
     use rand_core::OsRng;
 
     const K: usize = 14;

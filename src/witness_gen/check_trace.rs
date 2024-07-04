@@ -1,6 +1,4 @@
-use ff::{Field, PrimeField};
-use halo2_proofs::circuit::Value;
-use num_bigint::BigUint;
+use ff::PrimeField;
 
 /// EM = 0x00 || 0x01 || PS || 0x00 || T
 pub fn check_trace<F: PrimeField>(r_limbs: &[F], digest: &[F; 4]) {
@@ -44,8 +42,10 @@ pub fn check_trace<F: PrimeField>(r_limbs: &[F], digest: &[F; 4]) {
 
 #[test]
 fn test_check_trace() {
-    use super::trace_gen::Trace;
+    use super::{signature, trace_gen::Trace};
+    use ff::Field;
     use halo2curves::pasta::Fp;
+    use num_bigint::BigUint;
 
     let data = b"hello";
     let digest: [Fp; 4] = [
@@ -54,7 +54,7 @@ fn test_check_trace() {
         Fp::from(2803555822930092702),
         Fp::from(3238736544897475342),
     ];
-    let (n, sig) = super::signature::sign(data);
+    let (n, sig) = signature::sign(data);
 
     let trace = Trace::<Fp>::new(BigUint::from_bytes_be(&n));
     let r = trace

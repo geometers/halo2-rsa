@@ -1,14 +1,11 @@
-use crate::{
-    mul_cfgs::{MulAddConfig, MulConfig},
-    poly_eval::{self, LoadedPoly},
-};
-use ff::{Field, PrimeField, PrimeFieldBits};
-
+use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector, VirtualCells},
+    circuit::{Layouter, Value},
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
     poly::Rotation,
 };
+
+use crate::poly_eval::{self, LoadedPoly};
 
 #[derive(Clone)]
 pub(crate) struct Config<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> {
@@ -168,28 +165,25 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
 
 #[cfg(test)]
 mod tests {
+    use crate::poly_eval;
+    use ff::{FromUniformBytes, PrimeField, PrimeFieldBits, WithSmallOrderMulGroup};
     use halo2_proofs::{
-        circuit::floor_planner::V1,
+        circuit::{floor_planner::V1, AssignedCell, Layouter, Value},
+        dev::{metadata, FailureLocation, MockProver, VerifyFailure},
         plonk::{
-            create_proof, keygen_pk, keygen_vk, verify_proof, Challenge, Circuit, FirstPhase,
-            SecondPhase, VerifyingKey,
+            create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Challenge, Circuit, Column,
+            ConstraintSystem, Error, FirstPhase, SecondPhase, VerifyingKey,
         },
-        poly::commitment::{CommitmentScheme, Verifier},
-        transcript::EncodedChallenge,
+        poly::{
+            commitment::{CommitmentScheme, ParamsProver, Verifier},
+            VerificationStrategy,
+        },
+        transcript::{
+            Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge, TranscriptReadBuffer,
+            TranscriptWriterBuffer,
+        },
     };
     use halo2curves::{bn256::Bn256, pairing::Engine};
-
-    use super::*;
-
-    use crate::poly_eval;
-    use ff::{FromUniformBytes, PrimeFieldBits, WithSmallOrderMulGroup};
-    use halo2_proofs::{
-        dev::{metadata, FailureLocation, MockProver, VerifyFailure},
-        poly::{commitment::ParamsProver, VerificationStrategy},
-        transcript::{
-            Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-        },
-    };
     use rand_core::OsRng;
 
     #[derive(Clone, Debug, Default)]
