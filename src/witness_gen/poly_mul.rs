@@ -64,16 +64,3 @@ pub(super) fn poly_mul<F: Field>(a: &Vec<F>, b: &Vec<F>) -> Vec<F> {
 
     c_coeffs
 }
-
-// #[test]
-// fn test_poly_mul() {
-//     let a = vec![1u64, 2, 3, 4];
-//     let b = vec![1u64, 2, 3, 4];
-
-//     let c = poly_mul(a, b);
-//     let c_res = vec![1u64, 4, 10, 20, 25, 24, 16] ;
-
-//     for (c, c_res) in c.iter().zip(c_res.iter()) {
-//         assert_eq!(c, c_res);
-//     }
-// }
