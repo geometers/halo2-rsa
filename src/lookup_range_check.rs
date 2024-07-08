@@ -171,34 +171,6 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
         Ok(running_sum)
     }
 
-    /// Range check on a value that is witnessed in this helper.
-    pub fn witness_check(
-        &self,
-        mut layouter: impl Layouter<F>,
-        value: Value<F>,
-        num_bits: usize,
-    ) -> Result<RunningSum<F>, Error> {
-        let running_sum = layouter.assign_region(
-            || "Witness element",
-            |mut region| {
-                let z_0 =
-                    region.assign_advice(|| "Witness element", self.running_sum, 0, || value)?;
-                self.range_check(&mut region, z_0, num_bits)
-            },
-        )?;
-
-        // Range-constrain remaining chunk (if any).
-        if num_bits % K != 0 {
-            self.copy_short_check(
-                layouter.namespace(|| "leftover"),
-                running_sum[num_bits / K].clone(),
-                num_bits % K,
-            )?;
-        }
-
-        Ok(running_sum)
-    }
-
     /// If `num_bits` is not a multiple of `K`, then the final word must be
     /// `K % num_bits` bits (using a short range check).
     ///
@@ -297,32 +269,6 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
         )
     }
 
-    /// Short range check on value that is witnessed in this helper.
-    ///
-    /// # Panics
-    ///
-    /// Panics if num_bits is larger than K.
-    pub fn witness_short_check(
-        &self,
-        mut layouter: impl Layouter<F>,
-        element: Value<F>,
-        num_bits: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        assert!(num_bits <= K);
-        layouter.assign_region(
-            || format!("Range check {:?} bits", num_bits),
-            |mut region| {
-                // Witness `element` to use in the k-bit lookup.
-                let element =
-                    region.assign_advice(|| "Witness element", self.running_sum, 0, || element)?;
-
-                self.short_range_check(&mut region, element.clone(), num_bits)?;
-
-                Ok(element)
-            },
-        )
-    }
-
     /// Constrain `x` to be a NUM_BITS word.
     ///
     /// `element` must have been assigned to `self.running_sum` at offset 0.
@@ -361,6 +307,62 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
         )?;
 
         Ok(())
+    }
+
+    /// Range check on a value that is witnessed in this helper.
+    #[cfg(test)]
+    pub fn witness_check(
+        &self,
+        mut layouter: impl Layouter<F>,
+        value: Value<F>,
+        num_bits: usize,
+    ) -> Result<RunningSum<F>, Error> {
+        let running_sum = layouter.assign_region(
+            || "Witness element",
+            |mut region| {
+                let z_0 =
+                    region.assign_advice(|| "Witness element", self.running_sum, 0, || value)?;
+                self.range_check(&mut region, z_0, num_bits)
+            },
+        )?;
+
+        // Range-constrain remaining chunk (if any).
+        if num_bits % K != 0 {
+            self.copy_short_check(
+                layouter.namespace(|| "leftover"),
+                running_sum[num_bits / K].clone(),
+                num_bits % K,
+            )?;
+        }
+
+        Ok(running_sum)
+    }
+
+    /// Short range check on value that is witnessed in this helper.
+    ///
+    /// # Panics
+    ///
+    /// Panics if num_bits is larger than K.
+    #[cfg(test)]
+    pub fn witness_short_check(
+        &self,
+        mut layouter: impl Layouter<F>,
+        element: Value<F>,
+        num_bits: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        assert!(num_bits <= K);
+        layouter.assign_region(
+            || format!("Range check {:?} bits", num_bits),
+            |mut region| {
+                // Witness `element` to use in the k-bit lookup.
+                let element =
+                    region.assign_advice(|| "Witness element", self.running_sum, 0, || element)?;
+
+                self.short_range_check(&mut region, element.clone(), num_bits)?;
+
+                Ok(element)
+            },
+        )
     }
 }
 

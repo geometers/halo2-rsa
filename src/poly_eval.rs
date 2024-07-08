@@ -70,51 +70,9 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         self.range_check.load(layouter)
     }
 
-    pub(crate) fn witness_carry(
-        &self,
-        mut layouter: impl Layouter<F>,
-        carry_val: Value<F>,
-        num_bits: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        let witnessed = layouter.assign_region(
-            || "witness carry",
-            |mut region| region.assign_advice(|| "", self.poly, 0, || carry_val),
-        )?;
-
-        let witnessed = self.range_check.witness_check(
-            layouter.namespace(|| "carry_val"),
-            carry_val,
-            num_bits,
-        )?;
-
-        Ok(witnessed[0].clone())
-    }
-
-    pub(crate) fn witness_poly(
-        &self,
-        mut layouter: impl Layouter<F>,
-        coeff_vals: Vec<Value<F>>,
-        num_bits: usize,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        let mut coeffs = vec![];
-
-        // Witness and range-check each limb of poly_a to be 64 bits
-        for (i, coeff) in coeff_vals.iter().enumerate() {
-            let coeff = self.range_check.witness_check(
-                layouter.namespace(|| format!("coeff {}", i)),
-                *coeff,
-                num_bits,
-            )?[0]
-                .clone();
-            coeffs.push(coeff);
-        }
-
-        Ok(coeffs)
-    }
-
     pub(crate) fn witness_and_evaluate_inner<const COEFFS: usize>(
         &self,
-        mut region: &mut Region<'_, F>,
+        region: &mut Region<'_, F>,
         offset: usize,
         coeff_vals: &[Value<F>; COEFFS],
         x: Value<F>,
@@ -138,7 +96,7 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         coeffs.push(last_coeff_cell);
 
         for i in (0..=(n - 2)).rev() {
-            self.selector.enable(&mut region, i)?;
+            self.selector.enable(region, i)?;
             let coeff = region.assign_advice(
                 || format!("eval {}", i),
                 self.poly,
@@ -193,6 +151,51 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         Ok(poly)
     }
 
+    #[cfg(test)]
+    pub(crate) fn witness_carry(
+        &self,
+        mut layouter: impl Layouter<F>,
+        carry_val: Value<F>,
+        num_bits: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let _ = layouter.assign_region(
+            || "witness carry",
+            |mut region| region.assign_advice(|| "", self.poly, 0, || carry_val),
+        )?;
+
+        let witnessed = self.range_check.witness_check(
+            layouter.namespace(|| "carry_val"),
+            carry_val,
+            num_bits,
+        )?;
+
+        Ok(witnessed[0].clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn witness_poly(
+        &self,
+        mut layouter: impl Layouter<F>,
+        coeff_vals: Vec<Value<F>>,
+        num_bits: usize,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let mut coeffs = vec![];
+
+        // Witness and range-check each limb of poly_a to be 64 bits
+        for (i, coeff) in coeff_vals.iter().enumerate() {
+            let coeff = self.range_check.witness_check(
+                layouter.namespace(|| format!("coeff {}", i)),
+                *coeff,
+                num_bits,
+            )?[0]
+                .clone();
+            coeffs.push(coeff);
+        }
+
+        Ok(coeffs)
+    }
+
+    #[cfg(test)]
     pub(crate) fn evaluate(
         &self,
         mut layouter: impl Layouter<F>,

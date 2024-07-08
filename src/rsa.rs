@@ -85,8 +85,7 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
         let x = meta.challenge_usable_after(FirstPhase);
 
         let check_carry_to_zero_cfg = {
-            let poly =
-                poly_eval::Config::configure(meta, poly.clone(), eval, x, range_check, table);
+            let poly = poly_eval::Config::configure(meta, poly, eval, x, range_check, table);
             check_carry_to_zero::Config::configure(meta, poly, carry)
         };
 
@@ -105,6 +104,7 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
     }
 
     // now we check evaluations: a * b - q*n - r = f
+    #[allow(clippy::too_many_arguments)]
     fn check_evals(
         &self,
         mut layouter: impl Layouter<F>,
@@ -292,7 +292,7 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
             x,
         )?;
 
-        self.check_encoded_message(layouter.namespace(|| "check encoded message"), &r, &digest)?;
+        self.check_encoded_message(layouter.namespace(|| "check encoded message"), &r, digest)?;
 
         self.check_evals(
             layouter.namespace(|| "check evals"),

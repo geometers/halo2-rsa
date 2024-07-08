@@ -129,11 +129,11 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
                 )?;
                 shifted_carries.push(shifted_carry);
 
-                for i in 1..N {
+                for (i, &f_i) in f.iter().enumerate().take(N).skip(1) {
                     self.selector.enable(&mut region, i)?;
                     self.carry_shift_selector.enable(&mut region, i)?;
 
-                    carry = (carry + f[i]) * base_inv;
+                    carry = (carry + f_i) * base_inv;
                     carry_cell = region.assign_advice(|| "carry", self.carry, i, || carry)?;
 
                     let shifted_carry = region.assign_advice(
@@ -154,7 +154,7 @@ impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<B
         for shifted_carry in shifted_carries.iter() {
             self.poly.range_check.copy_check(
                 layouter.namespace(|| "range check shifted_carry"),
-                &shifted_carry,
+                shifted_carry,
                 70,
             )?;
         }

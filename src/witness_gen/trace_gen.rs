@@ -47,9 +47,9 @@ impl<F: PrimeField> Trace<F> {
         assert_eq!(c_prev * b, coeffs[0]);
 
         let mut c_next;
-        for i in 1..=(n - 2) {
-            c_next = (c_prev + coeffs[i]) * b_inv;
-            assert_eq!(c_next * b, c_prev + coeffs[i]);
+        for &coeffs_i in coeffs.iter().take(n - 1).skip(1) {
+            c_next = (c_prev + coeffs_i) * b_inv;
+            assert_eq!(c_next * b, c_prev + coeffs_i);
             c_prev = c_next;
         }
 
@@ -83,7 +83,7 @@ impl<F: PrimeField> Trace<F> {
             FpMulWitness::<F> {
                 q: array_value(q_poly.try_into().unwrap()),
                 r: array_value(r_poly.try_into().unwrap()),
-                f: array_value(f_poly.try_into().unwrap()),
+                f: array_value(f_poly),
             },
             r,
         )
