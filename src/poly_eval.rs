@@ -415,7 +415,7 @@ mod tests {
     fn poly_eval_test() {
         use halo2curves::bn256::Fr;
 
-        const K: u32 = 5;
+        const K: u32 = 7;
 
         // 4 + 30 + 200 + 1000
         let circuit = MyCircuit::<Fr> {
