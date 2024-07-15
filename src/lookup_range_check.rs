@@ -213,7 +213,8 @@ impl<F: PrimeFieldBits, const K: usize> LookupRangeCheckConfig<F, { K }> {
     ) -> Result<RunningSum<F>, Error> {
         // `num_bits` must fit into a single field element.
         assert!(num_bits <= F::CAPACITY as usize);
-        let num_words = num_bits.div_ceil(K);
+        // use (a + b - 1) / b to get the ceiling of a/b instead of unstable `div_ceil`
+        let num_words = (num_bits + K - 1) / K;
 
         // Chunk the first num_bits bits into K-bit words.
         let words = {
