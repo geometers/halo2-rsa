@@ -5,10 +5,10 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::poly_eval::{self, LoadedPoly};
+use crate::poly_eval::{self, LoadedPoly, BASE};
 
 #[derive(Clone)]
-pub(crate) struct Config<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> {
+pub(crate) struct Config<const N: usize, const K: usize, F: PrimeFieldBits> {
     poly: poly_eval::Config<K, F>,
     carry: Column<Advice>,
     shifted_carry: Column<Advice>,
@@ -17,7 +17,7 @@ pub(crate) struct Config<const BASE: u8, const N: usize, const K: usize, F: Prim
     carry_shift_selector: Selector,
 }
 
-impl<const BASE: u8, const N: usize, const K: usize, F: PrimeFieldBits> Config<BASE, N, K, F> {
+impl<const N: usize, const K: usize, F: PrimeFieldBits> Config<N, K, F> {
     pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
         poly: poly_eval::Config<K, F>,

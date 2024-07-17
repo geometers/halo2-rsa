@@ -8,6 +8,8 @@ use std::vec;
 
 use crate::lookup_range_check::LookupRangeCheckConfig;
 
+pub(crate) const BASE: u8 = 64;
+
 pub(crate) struct LoadedPoly<const COEFFS: usize, F: Field> {
     pub(crate) coeffs: [AssignedCell<F, F>; COEFFS],
     pub(crate) eval: AssignedCell<F, F>,
@@ -136,7 +138,6 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         mut layouter: impl Layouter<F>,
         // little-endian
         coeff_vals: [Value<F>; COEFFS],
-        num_bits: usize,
         x: Value<F>,
     ) -> Result<LoadedPoly<COEFFS, F>, Error> {
         let poly = layouter.assign_region(
@@ -145,7 +146,7 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         )?;
         for coeff in poly.coeffs.iter() {
             self.range_check
-                .copy_check(layouter.namespace(|| ""), coeff, num_bits)?;
+                .copy_check(layouter.namespace(|| ""), coeff, BASE as usize)?;
         }
 
         Ok(poly)

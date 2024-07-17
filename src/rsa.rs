@@ -15,7 +15,6 @@ use crate::{
     },
 };
 
-const BASE: u8 = 64;
 const N: usize = 32;
 const TWO_N_M1: usize = 63;
 
@@ -34,7 +33,7 @@ pub struct PKCSV15Witness<F: PrimeField> {
 #[derive(Clone)]
 pub struct Config<const TABLE_BITS: usize, F: PrimeFieldBits> {
     poly: poly_eval::Config<TABLE_BITS, F>,
-    check_carry_to_zero_cfg: check_carry_to_zero::Config<BASE, TWO_N_M1, TABLE_BITS, F>,
+    check_carry_to_zero_cfg: check_carry_to_zero::Config<TWO_N_M1, TABLE_BITS, F>,
     x: Challenge,
     mul_selector: Selector,
     minus_selector: Selector,
@@ -209,7 +208,6 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
         let a = self.poly.witness_and_evaluate_and_range_check::<N>(
             layouter.namespace(|| "a"),
             witness.sig,
-            BASE as usize,
             x,
         )?;
         let sig_eval = a.eval;
@@ -217,13 +215,11 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
         let q = self.poly.witness_and_evaluate_and_range_check::<N>(
             layouter.namespace(|| "q"),
             witness.trace[0].q,
-            BASE as usize,
             x,
         )?;
         let mut r = self.poly.witness_and_evaluate_and_range_check::<N>(
             layouter.namespace(|| "r"),
             witness.trace[0].r,
-            BASE as usize,
             x,
         )?;
         let f = self.check_carry_to_zero_cfg.synthesize(
@@ -247,13 +243,11 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
             let q = self.poly.witness_and_evaluate_and_range_check::<N>(
                 layouter.namespace(|| "q"),
                 witness.trace[i].q,
-                BASE as usize,
                 x,
             )?;
             r = self.poly.witness_and_evaluate_and_range_check::<N>(
                 layouter.namespace(|| "r"),
                 witness.trace[i].r,
-                BASE as usize,
                 x,
             )?;
             let f = self.check_carry_to_zero_cfg.synthesize(
@@ -278,7 +272,6 @@ impl<const TABLE_BITS: usize, F: PrimeFieldBits> Config<TABLE_BITS, F> {
         let q = self.poly.witness_and_evaluate_and_range_check::<N>(
             layouter.namespace(|| "q"),
             witness.trace[16].q,
-            BASE as usize,
             x,
         )?;
         let r = self.poly.witness_and_evaluate::<N>(
