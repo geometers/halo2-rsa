@@ -1,5 +1,3 @@
-use crate::lookup_range_check::LookupRangeCheckConfig;
-
 use ff::{Field, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, Value},
@@ -7,6 +5,8 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use std::vec;
+
+use crate::lookup_range_check::LookupRangeCheckConfig;
 
 pub(crate) struct LoadedPoly<const COEFFS: usize, F: Field> {
     pub(crate) coeffs: [AssignedCell<F, F>; COEFFS],
@@ -70,51 +70,9 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         self.range_check.load(layouter)
     }
 
-    pub(crate) fn witness_carry(
-        &self,
-        mut layouter: impl Layouter<F>,
-        carry_val: Value<F>,
-        num_bits: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        let witnessed = layouter.assign_region(
-            || "witness carry",
-            |mut region| region.assign_advice(|| "", self.poly, 0, || carry_val),
-        )?;
-
-        let witnessed = self.range_check.witness_check(
-            layouter.namespace(|| "carry_val"),
-            carry_val,
-            num_bits,
-        )?;
-
-        Ok(witnessed[0].clone())
-    }
-
-    pub(crate) fn witness_poly(
-        &self,
-        mut layouter: impl Layouter<F>,
-        coeff_vals: Vec<Value<F>>,
-        num_bits: usize,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        let mut coeffs = vec![];
-
-        // Witness and range-check each limb of poly_a to be 64 bits
-        for (i, coeff) in coeff_vals.iter().enumerate() {
-            let coeff = self.range_check.witness_check(
-                layouter.namespace(|| format!("coeff {}", i)),
-                *coeff,
-                num_bits,
-            )?[0]
-                .clone();
-            coeffs.push(coeff);
-        }
-
-        Ok(coeffs)
-    }
-
     pub(crate) fn witness_and_evaluate_inner<const COEFFS: usize>(
         &self,
-        mut region: &mut Region<'_, F>,
+        region: &mut Region<'_, F>,
         offset: usize,
         coeff_vals: &[Value<F>; COEFFS],
         x: Value<F>,
@@ -138,7 +96,7 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         coeffs.push(last_coeff_cell);
 
         for i in (0..=(n - 2)).rev() {
-            self.selector.enable(&mut region, i)?;
+            self.selector.enable(region, i)?;
             let coeff = region.assign_advice(
                 || format!("eval {}", i),
                 self.poly,
@@ -193,6 +151,51 @@ impl<const K: usize, F: PrimeFieldBits> Config<K, F> {
         Ok(poly)
     }
 
+    #[cfg(test)]
+    pub(crate) fn witness_carry(
+        &self,
+        mut layouter: impl Layouter<F>,
+        carry_val: Value<F>,
+        num_bits: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let _ = layouter.assign_region(
+            || "witness carry",
+            |mut region| region.assign_advice(|| "", self.poly, 0, || carry_val),
+        )?;
+
+        let witnessed = self.range_check.witness_check(
+            layouter.namespace(|| "carry_val"),
+            carry_val,
+            num_bits,
+        )?;
+
+        Ok(witnessed[0].clone())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn witness_poly(
+        &self,
+        mut layouter: impl Layouter<F>,
+        coeff_vals: Vec<Value<F>>,
+        num_bits: usize,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let mut coeffs = vec![];
+
+        // Witness and range-check each limb of poly_a to be 64 bits
+        for (i, coeff) in coeff_vals.iter().enumerate() {
+            let coeff = self.range_check.witness_check(
+                layouter.namespace(|| format!("coeff {}", i)),
+                *coeff,
+                num_bits,
+            )?[0]
+                .clone();
+            coeffs.push(coeff);
+        }
+
+        Ok(coeffs)
+    }
+
+    #[cfg(test)]
     pub(crate) fn evaluate(
         &self,
         mut layouter: impl Layouter<F>,
@@ -233,18 +236,19 @@ mod tests {
     use super::*;
 
     use ff::{FromUniformBytes, WithSmallOrderMulGroup};
-    use halo2_proofs::circuit::floor_planner::V1;
-    use halo2_proofs::poly::commitment::{CommitmentScheme, Verifier};
-    use halo2_proofs::transcript::EncodedChallenge;
     use halo2_proofs::{
+        circuit::floor_planner::V1,
         dev::{metadata, FailureLocation, MockProver, VerifyFailure},
-        poly::{commitment::ParamsProver, VerificationStrategy},
+        poly::{
+            commitment::{CommitmentScheme, ParamsProver, Verifier},
+            VerificationStrategy,
+        },
         transcript::{
-            Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+            Blake2bRead, Blake2bWrite, Challenge255, EncodedChallenge, TranscriptReadBuffer,
+            TranscriptWriterBuffer,
         },
     };
-    use halo2curves::bn256::Bn256;
-    use halo2curves::pairing::Engine;
+    use halo2curves::{bn256::Bn256, pairing::Engine};
     use rand_core::OsRng;
 
     #[derive(Clone)]
@@ -414,7 +418,7 @@ mod tests {
     fn poly_eval_test() {
         use halo2curves::bn256::Fr;
 
-        const K: u32 = 5;
+        const K: u32 = 7;
 
         // 4 + 30 + 200 + 1000
         let circuit = MyCircuit::<Fr> {

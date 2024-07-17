@@ -34,7 +34,7 @@ pub fn biguint_to_field<F: PrimeField>(x: &BigUint) -> Vec<F> {
 pub fn field_to_biguint<F: PrimeField>(x: F) -> BigUint {
     let bytes_to_u32 = |chunk_le: &[u8]| -> u32 {
         assert!(chunk_le.len() <= 4);
-        assert!(chunk_le.len() > 0);
+        assert!(!chunk_le.is_empty());
 
         let mut result: u32 = 0;
         result |= chunk_le[0] as u32;
@@ -57,7 +57,7 @@ pub fn field_to_biguint<F: PrimeField>(x: F) -> BigUint {
     let repr = x.to_repr(); // this gives a vector of u8
     let slice: &[u8] = repr.as_ref();
 
-    let chunks: Vec<u32> = slice.chunks(4).map(|chunk| bytes_to_u32(chunk)).collect();
+    let chunks: Vec<u32> = slice.chunks(4).map(bytes_to_u32).collect();
 
     BigUint::new(chunks)
 }

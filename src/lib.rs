@@ -187,10 +187,8 @@ FpMul:
 
 
 */
-#![feature(int_roundings)]
 mod check_carry_to_zero;
 mod lookup_range_check;
-mod mul_cfgs;
 mod poly_eval;
 pub mod rsa;
 pub mod witness_gen;

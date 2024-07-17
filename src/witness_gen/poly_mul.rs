@@ -24,9 +24,9 @@ fn pad_with_zeros<F: Field>(a: &mut Vec<F>, b: &mut Vec<F>) {
     }
 }
 
-pub(super) fn poly_mul<F: Field>(a: &Vec<F>, b: &Vec<F>) -> Vec<F> {
-    let mut a = a.clone();
-    let mut b = b.clone();
+pub(super) fn poly_mul<F: Field>(a: &[F], b: &[F]) -> Vec<F> {
+    let mut a = a.to_vec();
+    let mut b = b.to_vec();
     if a.len() != b.len() {
         pad_with_zeros(&mut a, &mut b);
     }
@@ -40,9 +40,8 @@ pub(super) fn poly_mul<F: Field>(a: &Vec<F>, b: &Vec<F>) -> Vec<F> {
 
     for deg in 0..k {
         let mut row_col_sum = F::ZERO;
-        for a_i in 0..(deg + 1) {
-            let b_i = deg - a_i;
-            row_col_sum += a[a_i] * b[b_i];
+        for (i, &a_i) in a.iter().enumerate().take(deg + 1) {
+            row_col_sum += a_i * b[deg - i];
         }
         c_coeffs.push(row_col_sum);
     }
@@ -64,16 +63,3 @@ pub(super) fn poly_mul<F: Field>(a: &Vec<F>, b: &Vec<F>) -> Vec<F> {
 
     c_coeffs
 }
-
-// #[test]
-// fn test_poly_mul() {
-//     let a = vec![1u64, 2, 3, 4];
-//     let b = vec![1u64, 2, 3, 4];
-
-//     let c = poly_mul(a, b);
-//     let c_res = vec![1u64, 4, 10, 20, 25, 24, 16] ;
-
-//     for (c, c_res) in c.iter().zip(c_res.iter()) {
-//         assert_eq!(c, c_res);
-//     }
-// }

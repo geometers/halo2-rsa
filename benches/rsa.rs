@@ -1,9 +1,10 @@
-use ff::{Field, PrimeFieldBits};
+use criterion::{criterion_group, criterion_main, Criterion};
+use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{floor_planner::V1, Layouter, SimpleFloorPlanner, Value},
+    circuit::{floor_planner::V1, Layouter, Value},
     plonk::{
-        create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Circuit, Column,
-        ConstraintSystem, Error, Instance, SecondPhase,
+        create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem, Error,
+        SecondPhase,
     },
     poly::{
         commitment::ParamsProver,
@@ -11,22 +12,17 @@ use halo2_proofs::{
             commitment::{KZGCommitmentScheme, ParamsKZG},
             multiopen::ProverGWC,
         },
-        VerificationStrategy,
     },
-    transcript::{
-        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-    },
+    transcript::{Blake2bWrite, Challenge255, TranscriptWriterBuffer},
+};
+use halo2_rsa::{
+    rsa::{Config, PKCSV15Witness},
+    witness_gen::signature::sign,
 };
 use halo2curves::bn256::{Bn256, Fr};
-
-use halo2_rsa::rsa::{Config, PKCSV15Witness};
-use halo2_rsa::witness_gen::signature::sign;
 use num_bigint::BigUint;
 use rand_core::OsRng;
-
 use std::convert::TryInto;
-
-use criterion::{criterion_group, criterion_main, Criterion};
 
 #[derive(Clone, Default)]
 struct RsaCircuit<F: PrimeFieldBits, const TABLE_BITS: usize> {
